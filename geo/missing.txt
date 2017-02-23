@@ -1,0 +1,12 @@
+antigua and barbuda
+cape verde
+marshall_islands
+saint_kitts_and_nevis
+saint lucia
+saint_vincent_and_the_grenadines
+san marino
+sao_tome_and_principe
+
+
+stack bar
+show or not show country which never vote
