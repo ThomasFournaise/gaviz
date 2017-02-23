@@ -1,0 +1,1216 @@
+<!DOCTYPE html>
+<html lang="en">
+	<!-- 
+	Word cloud based on https://github.com/jasondavies/d3-cloud
+	
+	Functional Improvements
+		User can select/enter events to show
+		Abilty to customize "big dates" by an input field on the form		
+		Add other search criteria (registered, adopted without vote, etc
+		Search a country and highlight it on the different graphs (add a class with the name of the country and with country, when selected underligth all .country then highlight .coutryname)
+		
+	Technical improvements
+		Add verifications to ensure that there are no errors when there is no resolutions (test with a search like aearztrdg)		
+		Better management of the legend (always on first plan) on the graphs
+		Improve legend mangement on map		
+		Load files by a defer with queue.js ??
+		Test regexp with double quote, single quote, etc.
+		Remove hidden form fr wordcloud and add variables in the cloud2.js.
+	
+	Evolutions
+		Timeline with resolutions
+			add link to UN website
+			add the list of countries who vote yes / no (is it interesting if there is a link to UN web site ?)
+		Map : add the resolutions voted by the country
+		
+		Compare vote of two countries or more during time ???
+		
+		Group votes by continent or group of countries (religion, geography, etc.)
+		Ability to make your own group
+		
+		Correlation by selecting one country only => will improve performance
+		
+		Show which votes had been done as a security council member or not (other color of votes ?) www.un.org/en/sc/members/elected.asp
+		
+		Only show countries which existed at a specific period (USSR, serbia for example)
+			Think about a way to show this information on the map whe the same territory has been part of multiple courntries
+
+	-->
+	<head>
+		<meta charset="utf-8">
+		<title>GAViz - UN general assembly resolutions explorer</title>
+		<script type="text/javascript" src="js/d3.min.js"></script>
+		<script type="text/javascript" src="js/jquery.min.js"></script>
+		<script type="text/javascript" src="js/colorbrewer.js"></script>
+		<script type="text/javascript" src="js/d3-legend.js"></script>
+		<script type="text/javascript" src="js/bootstrap.min.js"></script>						
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.5/leaflet.js"></script>	
+<script src="https://cdn.jsdelivr.net/jstat/latest/jstat.min.js"></script>	
+
+    <link rel="stylesheet" type="text/css" href="http://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.5/leaflet.css"/>
+    <link rel="stylesheet" type="text/css" href="css/bootstrap.min.css"/>
+<link href="css/bootstrap-theme.min.css" rel="stylesheet">	
+	
+	
+		<style type="text/css">
+			#resoCountry, #resoDate, #correl, #countryTime {
+				width : 1080px;
+				overflow : auto;
+			}
+	
+			#resoCountry, #resoDate, #correl, #correl svg, #vis, #vis svg, #map, #countryNumber, #inputForm, #divMap, #showDiv, #countryTime {
+				margin-left:auto;
+				margin-right:auto;
+				text-align:center;
+			}
+	
+	
+	.info {
+		padding: 6px 8px;
+		font: 14px/16px Arial, Helvetica, sans-serif;
+		background: white;
+		background: rgba(255,255,255,0.8);
+		box-shadow: 0 0 15px rgba(0,0,0,0.2);
+		border-radius: 5px;
+	}
+			.grid .tick {
+				stroke: lightgrey;
+				stroke-opacity: 0.7;
+				shape-rendering: crispEdges;
+			}
+			
+			.grid path {
+				stroke-width: 0;
+			}
+
+			.axis path,
+			.axis line {
+				fill: none;
+				stroke: black;
+				shape-rendering: crispEdges;
+			}
+			
+			.axis text {
+				font-family: sans-serif;
+				font-size: 11px;
+			}
+			
+			div.tooltip {
+			  position: absolute;	
+			  text-align: center;	
+			  width: 150px;		
+			  padding: 2px;	
+			  font: 12px sans-serif;	
+			  background: lightsteelblue;	
+			  border: 0px;					
+			  border-radius: 8px;
+			  pointer-events:none;
+			}
+			
+			#title, #expText  {
+    width: 70%;
+    margin: 0 auto;
+}
+#title {
+text-align:center;
+}
+
+#expText {
+    border-radius: 25px;
+    border: 2px solid #8AC007;
+	padding : 5px 5px 5px 5px;
+	background : #d3d3d3;
+	margin-bottom:10px;
+}
+
+#map {
+  width: 960px;
+  height: 500px;
+}
+
+svg {
+  position: relative;
+}
+
+path.country {
+  fill: #000;
+  fill-opacity: 1;
+  stroke: #fff;
+  stroke-width: 1.5px;
+}
+
+path.country:hover {
+  fill: brown;
+  fill-opacity: 1;
+}
+
+</style>		
+		
+	</head>
+	<body>
+	<div class="container-fluid">
+		<div id="title" class="row"><H1>Navigate in the UNO General Assembly Resolutions</H1></div>
+		<Div id="expText" class="row"><p>Interactive datavizualisation made by <a href="https://twitter.com/FournaiseThomas">@FournaiseThomas</a></p>
+		<p>Search for keyword in the search bar. You will then see some dataviz about the votes. Click or pass over graphs to have more informations</p>
+		<p>At the bottom of the graphs you can have the list of documents corresponding to your filtering criteria</p>
+		<p>Initial loading can be slow based on your bandwidth (more than 20 sec) if you want to see an alleged (less data) version go here : <a href="https://gaviz.evhunt.com/index2.html">gaviz.evhunt.com/index2.html</a></p>
+		<p>Version without correlation : <a href="https://gaviz.evhunt.com/index.html">gaviz.evhunt.com/index.html</a></p>
+		</div>
+		<div id="inputForm" class="row">
+		<div class="form-inline form-group">
+			<label for="keyword">Keyword</label><input type="text" id="keyword" placeholder="search for keywords like atomic, algeria, etc."  class="form-control"> 
+			<label for="startdate">start date <input type="text" id="startdate" placeholder="20161225"  class="form-control"></label>
+			<label for="enddate">end date <input type="text" id="enddate" placeholder="20161225"  class="form-control"></label></BR>
+			<label for="resoType">Resolutions</label> <input type="radio" id="resoType" name="resoType" value="sc" > Security council
+					  <input type="radio" name="resoType" value="ga"> General Assembly
+					  <input type="radio" name="resoType" value="both" checked> Both</BR>
+			<button type="button" id="searchButton" class="btn btn-default">Search</button>
+		</div></div>
+		<div id="showDiv">
+			<button type="button" id="showMap" class="btn btn-default">Show/hide map</button>
+			<button type="button" id="showResoCountry" class="btn btn-default">Show/hide votes per country</button>						
+			<button type="button" id="showResoDate" class="btn btn-default">Show/hide votes on time</button>
+			<button type="button" id="showEvents" class="btn btn-default">Show/hide Events on timeline</button>
+			<button type="button" id="showCloud" class="btn btn-default">Show/hide Word Cloud</button>
+			<button type="button" id="showCorrel" class="btn btn-default">Show/hide Correlation</button>
+			<button type="button" id="showDocList" class="btn btn-default">Show/hide Document List</button>
+		</div>
+		<div id="countryNumber" class="row"></div>
+		<div id="divMap" class="row"><H2>Votes per country</H2>
+			<p id="map">
+		</div>
+		<div id="resoCountry"><H2>Votes per country</H2><H4>click on a bar to see how this country votes on each resolution</H4></div>
+		<div id="countryTime"><H2>Votes per country on time</H2><H4>click on a bar in the graph above to see how this country votes on each resolution</H4></div>
+		<div id="resoDate"><H2>Votes per resolution (ordered by time)</H2></div>
+		<div id="vis"><H2>Word cloud</H2></div>
+		<div id="correl"><H2>Votes correlation of countries</H2></div>
+		<div id="docList"></div>
+
+<form id="form" style="display:none;">
+
+<p style="position: absolute; right: 0; top: 0" id="status"></p>
+
+<div style="text-align: center">
+  <div id="presets"></div>
+  <div id="custom-area">
+    <p><textarea id="text">
+    </textarea>
+    <button id="go" type="submit">Go!</button>
+  </div>
+</div>
+
+
+  <input type="number" value="50" min="1" id="max">
+  <input type="checkbox" id="per-line">
+
+   <input type="radio" name="spiral" id="archimedean" value="archimedean" checked="checked"> 
+   <input type="radio" name="spiral" id="rectangular" value="rectangular"> 
+
+    <input type="radio" name="scale" id="scale-log" value="log" checked="checked"> l
+    <input type="radio" name="scale" id="scale-sqrt" value="sqrt"> 
+   <input type="radio" name="scale" id="scale-linear" value="linear">
+<input type="text" id="font" value="Impact">
+
+  <input type="number" id="angle-count" value="5" min="1">
+    <input type="number" id="angle-from" value="-0" min="-90" max="90">
+    <input type="number" id="angle-to" value="0" min="-90" max="90">
+
+</form>
+		
+		
+	</div>	
+		<script type="text/javascript">
+
+var separator=";";
+var dsv = d3.dsv(separator, "text/plain");
+var votesByCountry = [];
+var countryList=[];
+var attributeMatrix = [];
+var filteredDataset;
+//order event by date
+var worldEvents=[{'date':'19480514','event':'Israel creation'},{'date':'19570325','event':'UE creation'},{'date':'19631122','event':'JFK Death'},{'date':'19731006','event':'Kippour war'},{'date':'1990117','event':'sandstorm start'},{'date':'19911226','event':'USSR end'},{'date':'20121221','event':'world end'}];
+
+var fileData;
+var votes = ["Y", "N", "A", "9"];	
+var votesTime = ["Y", "N", "A", "NV"];
+var searchText = $('#keyword').val();
+var startDate = $('#startdate').val();
+var endDate = $('#enddate').val();
+var resoType = $('input[name=resoType]:checked').val();
+
+var colorMap = d3.scale.quantile()
+	.range(colorbrewer.BuGn[6]); 
+//var colorMap = d3.scale.quantize()
+//.range(["#ffffcc", "#c2e699", "#78c679", "#31a354", "#006837"]);
+//Colors taken from colorbrewer.js, included in the D3 download
+/*			var colorScale = d3.scale.quantile()
+			.domain([10,200]) // input data
+			.range(colorbrewer.PuBu[9]);
+			*/
+
+	
+	//piechart and stackbar colors	
+	var colors = ["#2c7bb6", "#d7191c", "#fdae61", "#abd9e9"];
+var pattAdoptwitout = new RegExp("ADOPTED WITHOUT", 'i');
+var pattNonRecord = new RegExp("NON-RECORDED", 'i');
+var pattRec = new RegExp("RECORDED", 'i');
+
+
+/**start correl generalities ***/
+	
+
+	var width = 1080,
+		height = 1080;
+
+	var svgCorrel = d3.select("#correl")
+	  .append("svg")
+	  .attr("width", width)
+	  .attr("height", height);
+
+	var colorCorrel = d3.scale.quantile()
+		.range(colorbrewer.RdYlGn[7])
+		.domain([-1,1]);
+
+
+	
+/**end correl generalities ***/
+
+
+/**start stack generalities ***/
+	var margin = {top: 20, right: 50, bottom: 75, left: 30};
+
+	var width = 1080,
+		height = 600 - margin.top - margin.bottom;
+
+	var svgStack = d3.select("#resoCountry")
+	  .append("svg")
+	  .attr("width", width)
+	  .attr("height", height + margin.top + margin.bottom)
+	  .append("g")
+	  .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+	var parse = d3.time.format("%Y").parse;
+
+	// Set x, y and colors
+	var x = d3.scale.ordinal()
+	  .rangeRoundBands([10, width- margin.left]);
+
+	var y = d3.scale.linear()
+	 .range([height, 0]);
+
+	// Define and draw axes
+	var yAxis = d3.svg.axis()
+	  .scale(y)
+	  .orient("left")
+	  .ticks(5)
+	  .tickSize(-width, 0, 0)
+	  .tickFormat( function(d) { return d } );
+
+	var xAxis = d3.svg.axis()
+	  .scale(x)
+	  .orient("bottom");
+
+	svgStack.append("g")
+	  .attr("class", "stack y axis")
+	  .call(yAxis);
+
+	svgStack.append("g")
+	  .attr("class", "stack x axis")
+	  .attr("transform", "translate(0," + height + ")")
+	  .call(xAxis);
+
+	// Draw legend
+	var legend = svgStack.selectAll(".legend")
+	  .data(colors)
+	  .enter().append("g")
+	  .attr("class", "legend")
+	  .attr("transform", function(d, i) { return "translate(30," + i * 19 + ")"; });
+	 
+	legend.append("rect")
+	  .attr("x", 5 - margin.left)
+	  .attr("width", 18)
+	  .attr("height", 18)
+	  .style("fill", function(d, i) {return colors[i];});
+	 
+	legend.append("text")
+	  .attr("x", 28 - margin.left)
+	  .attr("y", 9)
+	  .attr("dy", ".35em")
+	  .style("text-anchor", "start")
+	  .text(function(d, i) { return votes[i]; });
+	 
+/**end stack generalities ***/
+
+/**start timeline generalities ***/
+	var margin = {top: 20, right: 50, bottom: 75, left: 30};
+
+	var widthTime = 1080,
+		height = 600 - margin.top - margin.bottom;
+
+	var svgTime = d3.select("#resoDate")
+	  .append("svg")
+	  .attr("width", widthTime)
+	  .attr("height", height + margin.top + margin.bottom)
+	  .append("g")
+	  .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+	var parse = d3.time.format("%Y").parse;
+
+	// Set x, y and colors
+	var xTime = d3.scale.ordinal()
+	  .rangeRoundBands([10, widthTime- margin.left - margin.right]);
+
+	var yTime = d3.scale.linear()
+	 .range([height, 0]);
+
+	// Define and draw axes
+	var yAxisTime = d3.svg.axis()
+	  .scale(yTime)
+	  .orient("left")
+	  .ticks(5)
+	  .tickSize(-widthTime, 0, 0)
+	  .tickFormat( function(d) { return d } );
+
+	var xAxisTime = d3.svg.axis()
+	  .scale(xTime)
+	  .orient("bottom");
+
+	svgTime.append("g")
+	  .attr("class", "time y axis")
+	  .call(yAxisTime);
+
+	svgTime.append("g")
+	  .attr("class", "time x axis")
+	  .attr("transform", "translate(0," + height + ")")
+	  .call(xAxisTime);
+
+	// Draw legend
+	var legend = svgTime.selectAll(".legend")
+	  .data(colors)
+	  .enter().append("g")
+	  .attr("class", "legend")
+	  .attr("transform", function(d, i) { return "translate(30," + i * 19 + ")"; });
+	 
+	legend.append("rect")
+	  .attr("x", 5 - margin.left )
+	  .attr("width", 18)
+	  .attr("height", 18)
+	  .style("fill", function(d, i) {return colors[i];});
+	 
+	legend.append("text")
+	  .attr("x", 28 - margin.left)
+	  .attr("y", 9)
+	  .attr("dy", ".35em")
+	  .style("text-anchor", "start")
+	  .text(function(d, i) { return votesTime[i]; });
+	 
+/**end timeline generalities ***/
+
+
+/**start piechart generalities ***/
+var outerRadius=10;
+var innerRadius=0;
+var arc=d3.svg.arc().innerRadius(innerRadius).outerRadius(outerRadius);
+var pie=d3.layout.pie();	
+
+/**end piechart generalities ***/
+
+/**start map generalities ****/
+
+var usCenter = {lat:38, lng:-97};
+
+    var mbAttr = 'Map data &copy; <a href="http://openstreetmap.org">OpenStreetMap</a> contributors, ' +
+      '<a href="http://creativecommons.org/licenses/by-sa/2.0/">CC-BY-SA</a>, ' +
+      'Imagery <a href="http://mapbox.com">OSM</a>';	
+	  
+var map = new L.Map("map", {center: [15, 0], zoom: 2})
+	.addLayer(new L.TileLayer("http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {id: 'mapbox.light'  , attribution: mbAttr}));
+
+var svgMap = d3.select(map.getPanes().overlayPane).append("svg"),
+    g = svgMap.append("g").attr("class", "leaflet-zoom-hide");
+
+var transform = d3.geo.transform({point: projectPoint}),
+	path = d3.geo.path().projection(transform);
+	
+
+	
+    var mapLegend;
+	mapLegend= L.control({position: 'bottomright'});
+	mapLegend.onAdd = function (map) {
+		var div = L.DomUtil.create('div', 'info legend');
+		div.innerHTML += '<p>votes #</p>';
+		return div;
+	};
+    mapLegend.addTo(map);
+   
+	
+/**end map generalities ***/	
+
+/** start doc list generalities**/
+var docList = d3.select("#docList");
+			
+/** end doc list generalities **/
+
+// Define the div for the tooltip
+var divTooltip = d3.select("body").append("div")	
+    .attr("class", "tooltip")				
+    .style("opacity", 0);
+	
+/** start reading file **/
+
+/** start buttons **/
+		$( "#showMap" ).click( function(event) {
+			$("#divMap").toggle();
+		});	
+		$( "#showResoCountry" ).click( function(event) {
+			$("#resoCountry").toggle();
+		});	
+		$( "#showResoDate" ).click( function(event) {
+			$("#resoDate").toggle();
+		});	
+		$( "#showEvents" ).click( function(event) {
+			$(".events").toggle();
+		});				
+		$( "#showCloud" ).click( function(event) {
+			$("#vis").toggle();
+		});			
+		$( "#showCorrel" ).click( function(event) {
+			$("#correl").toggle();
+		});	
+		$( "#showDocList" ).click( function(event) {
+			$("#docList").toggle();
+		});			
+/** end buttons **/
+
+
+
+
+var data = dsv('votes5.csv', function(csvData) {
+
+d3.json("geo/countries.geo.json", function(error, collection) {
+	if (error) throw error;
+
+	 
+	var feature = g.selectAll("path")
+		.data(collection.features)
+		.enter().append("path");
+	
+	searchText = $('#keyword').val();
+	startDate = $('#startdate').val();
+	endDate = $('#enddate').val();
+	fileData=csvData;
+
+	$("#searchButton").click(function(){filtering();});
+	filtering();
+
+//this function is called for each search	
+	function filtering() {
+	
+		//empty pie chart
+		svg.selectAll(".arc.unVotes").remove();
+		svg.selectAll(".country").style("fill","#000");
+		svg.selectAll(".legendQuant").remove(); 
+		
+		// remove elements and prepare variables
+		svgTime.selectAll(".events").remove();
+		countryList=[];
+		votesByCountry=[];
+		attributeMatrix = [];
+		searchText = $('#keyword').val();
+		startDate = $('#startdate').val();
+		endDate = $('#enddate').val();
+		if (endDate =="") {endDate=99991231;}
+		resoType = $('input[name=resoType]:checked').val();
+		var pattReso = new RegExp("", 'i');
+		switch(resoType) {
+			case "ga":
+				var pattReso = new RegExp("A/RES", 'i');
+				break;
+			case "sc":
+				var pattReso = new RegExp("S/RES", 'i');
+				break;
+		} 
+		
+		var patt = new RegExp(searchText, 'i');
+		
+		//filtering data
+		filteredDataset=csvData;
+		var filterText = "<span>The following filters are active : </span>"
+		var fullText=""
+		filteredDataset = filteredDataset.filter(function(data) {
+			var res = patt.test(data['title']) && (endDate>=data['vote_date']) && (startDate<=data['vote_date']) && pattReso.test(data['un_resolution_symbol'])  ;
+			if (res) { 
+				fullText = fullText+" "+ data['title'];
+			}
+			return res;  
+		});
+		$("#text").html(fullText);
+		document.getElementById('go').click();
+		
+		//filtering "big" events
+		filteredWorldEvents = worldEvents.filter(function(data) {
+			var res =  (endDate>=data['date']) && (startDate<=data['date'])   ; 
+			return res;  
+		});
+		
+		//show UN resolutions
+		textDocList= filteredDataset.length+ " resolutions on " +csvData.length+ " correspond to your search criteria :</BR>"
+		filteredDataset.forEach(function(d) {
+			textDocList += "* "+ d.title+"</BR>";
+		});
+		docList.html(textDocList);		
+	
+		//nesting data: calculation of the votes per country
+		var nested_data = d3.nest()
+		.rollup(function(leaves) {
+			var json = new Object();
+			var json2 = new Object();
+			var tempObj=filteredDataset[0];
+			var text = '[';		
+			for(var i in tempObj) {
+				if (i=="vote_notes") {
+					valAdoptW =d3.sum(leaves, function(d) {
+						if (d[i].startsWith("ADOPTED WITHOUT") ) return 1; else return 0;
+					})
+					valNonRecord =d3.sum(leaves, function(d) {
+						if (d[i].startsWith("NON-RECORDED") ) return 1; else return 0;
+					})
+					valRec =d3.sum(leaves, function(d) {
+						if (d[i].startsWith("RECORDED") ) return 1; else return 0;
+					})
+					valEmptyNotes =d3.sum(leaves, function(d) {
+						if (d[i]=="" ) return 1; else return 0;
+					})
+					text += '{"votes":"'+i+'","AdoptW":'+valAdoptW+',"NR":'+valNonRecord+',"R":'+valRec+',"Empt":'+valEmptyNotes+',"total":'+ (valAdoptW+valNonRecord+valRec+valEmptyNotes) +'},';
+				
+				} else if (i!="un_resolution_symbol" && i!="title" && i!="vote_date" && i!="voting_summary") { 
+					leaves.forEach(function(d) {
+							if (votesByCountry[i] !== undefined) 
+								votesByCountry[i].push(replacevote(d[i])); 
+							else  {
+								votesByCountry[i]= [replacevote(d[i])]; 
+								countryList.push(i);
+							}
+					})
+					valY=d3.sum(leaves, function(d) {
+						if (d[i]=="Y") return 1; else return 0;
+					})
+					valN=d3.sum(leaves, function(d) {
+						if (d[i]=="N") return 1; else return 0;
+					})
+					valA=d3.sum(leaves, function(d) {
+						if (d[i]=="A") return 1; else return 0;
+					})
+					val9=d3.sum(leaves, function(d) {
+						if (d[i]=="9") return 1; else return 0;
+					})
+					if ((valY+valN+valA+val9)!=0) {
+						text += '{"country":"'+i+'","Y":'+valY+',"N":'+valN+',"A":'+valA+',"9":'+val9+',"total":'+ (valY+valN+valA+val9) +'},';
+					}		
+				}
+				
+			}
+			text += '{"country":"end","Y":0,"N":0,"A":0,"0":0,"9":0}]';			//adding empty json to avoid that array finish by a coma
+			JText = JSON.parse(text);
+			JText.pop(); // deleting final empty value
+			json2=JText;
+			return json2;
+		})
+		.entries(filteredDataset);
+		
+		//preparing data for the timeline
+		var timeDatasetInit = [] ;
+		filteredDataset.forEach(function(d, i) {
+			if (d.voting_summary != "") {
+				numVotesArray= d['voting_summary'].replace(/ /g, '').split(",");
+				var timeText = '{"date":"'+d.vote_date+'","name":"'+d.un_resolution_symbol+'","Y":"'+ +numVotesArray[0].split(":")[1]+'","N":"'+ +numVotesArray[1].split(":")[1]+'","A":"'+ +numVotesArray[2].split(":")[1]+'","NV":"'+ +numVotesArray[3].split(":")[1]+'","total":"'+ +numVotesArray[4].split(":")[1]+'"}';
+				timeDatasetInit.push(JSON.parse(timeText));
+			}		
+		});
+		
+		timeDatasetInit.sort(function(a,b) {return a.date-b.date;});
+		
+		var voteNotes = nested_data[0];
+		nested_data.shift(); // deleting first value which correpond to voting information
+		$('#countryNumber').html(nested_data.length+" countries participating in votes; "+voteNotes['AdoptW']+" resolutions adopted without vote and "+voteNotes['NR']+" non recorded votes on a total of "+filteredDataset.length+" resolutions");
+
+
+/***** start correlation ***********/
+
+countryList.forEach(function (a, x) {
+  countryList.forEach(function (b, y) {
+    //create an n-by-n matrix based on pairs of attributes
+    attributeMatrix.push({a: a, b: b, x: x, y: y})
+  })
+})
+
+i=0;
+var cll = countryList.length;
+svgCorrel.attr("width", cll*50 + 95).attr("height", cll*50 + 55);
+//if there is less than 15 countries, show country name else, only show the correlation
+if (cll<15) {
+	countryList.forEach(function(d) {
+		currentCountry=countryList[i];
+		currentdata=votesByCountry[d];
+		j=1;
+		for (j=i+1;j<cll;j++) {
+			k = countryList[j];
+			secondData=votesByCountry[k];	
+			correlValue = jStat.corrcoeff( currentdata, secondData );
+			
+			if (j==i+1) {
+				//text on top
+				svgCorrel.append("text")
+					.attr("y", 55)
+					.attr("x", 50*i+120)
+					.attr("dy", ".35em")
+					.attr("transform", "rotate(-45 "+ (50*i+120) +" "+55+")")
+					.style("text-anchor", "start")
+					.text(k);
+				
+				//text on left
+				svgCorrel.append("text")
+					.attr("y", 10+25+50+i*50)
+					.attr("x", 50*i+95)
+					.attr("dy", ".35em")
+					.style("text-anchor", "end")
+					.text(currentCountry);
+			}
+			
+			//rect colorCorrel
+			svgCorrel.selectAll("."+currentCountry+"."+k).data(JSON.parse('[{"currentCountry":"'+currentCountry+'","k":"'+k+'","correlValue":"'+correlValue+'"}]')).enter().append("rect")
+				.attr("y", 10+5+50+i*50)
+				.attr("x", 50*j+45+5)
+				.attr("width", 40)
+				.attr("height", 40)
+				.attr("fill", function() {return colorCorrel(correlValue);})
+				.on("mouseover", function(dat) {  
+					divTooltip.transition()		
+						.duration(200)		
+						.style("opacity", .9);		
+					divTooltip.html("correlation for " +dat.currentCountry+" and "+ dat.k +" : " + dat.correlValue )	
+						.style("left", (d3.event.pageX) + "px")		
+						.style("top", (d3.event.pageY) + "px");	
+				  })
+				  .on("mouseout", function() {
+					divTooltip.transition()		
+						.duration(500)		
+						.style("opacity", 0);
+				  });
+		};
+		i++;
+	})
+} else {
+	svgCorrel.attr("width", cll*5).attr("height", cll*5);
+	countryList.forEach(function(d) {
+		currentCountry=countryList[i];
+		currentdata=votesByCountry[d];
+		j=1;
+		for (j=i+1;j<cll;j++) {
+			k = countryList[j];
+			secondData=votesByCountry[k];
+			correlValue = jStat.corrcoeff( currentdata, secondData );
+			//rect colorCorrel
+			svgCorrel.selectAll("."+currentCountry+"."+k).data(JSON.parse('[{"currentCountry":"'+currentCountry+'","k":"'+k+'","correlValue":"'+correlValue+'"}]')).enter().append("rect")
+				.attr("y", i*5)
+				.attr("x", 5*j)
+				.attr("width", 3)
+				.attr("height", 3)
+				//.attr("transform", "rotate(-45)")
+				.attr("fill", function() {return colorCorrel(correlValue);})
+				.on("mouseover", function(dat) {  
+					divTooltip.transition()		
+						.duration(200)		
+						.style("opacity", .9);		
+					divTooltip.html("correlation for " +dat.currentCountry+" and "+ dat.k +" : " + dat.correlValue )	
+						.style("left", (d3.event.pageX) + "px")		
+						.style("top", (d3.event.pageY) + "px");	
+				  })
+				  .on("mouseout", function() {
+					divTooltip.transition()		
+						.duration(500)		
+						.style("opacity", 0);
+				  });
+		};
+		
+		i++;
+	})
+
+}
+
+/********* end correlation ******/		
+		
+		
+/****** start stack bar *****/			
+
+		var Tab_nested=nested_data;
+		  var stackDataset = d3.layout.stack()(votes.map(function(c) {
+			var bibi= Tab_nested.map(function(d) {
+			  return {x: d.country, y: d[c], "9":d['9'], total:d.total, Y:d.Y, N:d.N, A:d.A};
+			});
+			return bibi;
+		  }));
+
+		width = Math.max(1000, Tab_nested.length*6);  
+		d3.select("#resoCountry svg")
+			.attr("width", width+margin.left+margin.right);
+		x.rangeRoundBands([0, width]);
+
+		y.range([height, 0]);
+
+	// Define and draw axes
+	var yAxis = d3.svg.axis()
+	  .scale(y)
+	  .orient("left")
+	  .ticks(5)
+	  .tickSize(-width, 0, 0)	
+
+	
+		// update scale	  
+		x.domain(stackDataset[0].map(function(d) { return d.x; }))
+		y.domain([0, d3.max(stackDataset, function(d) {  return d3.max(d, function(d) { return d.y0 + d.y; });  })]);
+			
+		//update axis
+		xAxis.scale(x);
+		yAxis.scale(y);
+
+		d3.select(".x.stack")
+		.call(xAxis)
+		.selectAll("text")
+			.attr("y", 0)
+			.attr("x", 9)
+			.attr("dy", ".35em")
+			.attr("transform", "rotate(90)")
+			.style("text-anchor", "start");
+		
+		d3.select(".y.stack")
+		.call(yAxis);
+
+		// Create groups for each series, rects for each segment 
+		var groups = svgStack.selectAll("g.cost") 
+		  .data(stackDataset);
+		groups.enter().append("g")
+		  .attr("class", "cost");
+		groups.exit().remove();
+		groups 
+		  .style("fill", function(d, i) { return colors[i]; });
+
+		var rect = groups.selectAll("rect")
+		  .data(function(d) { return d; });
+		rect.enter()
+		  .append("rect");
+		rect.exit().remove();  
+		rect
+		  .attr("x", function(d) { return x(d.x); })
+		  .attr("y", function(d) { return y(d.y0 + d.y); })
+		  .attr("height", function(d) { return y(d.y0) - y(d.y0 + d.y); })
+		  .attr("width", x.rangeBand()-1)
+		  .on("mouseover", function(d) {  
+			divTooltip.transition()		
+                .duration(200)		
+                .style("opacity", .9);		
+            divTooltip.html(d.x +" : "+d.y+" votes on "+ d.total+" total votes")	
+                .style("left", (d3.event.pageX) + "px")		
+                .style("top", (d3.event.pageY) + "px");	
+		  })
+		  .on("mouseout", function() {
+			divTooltip.transition()		
+                .duration(500)		
+                .style("opacity", 0);
+		  })
+		  .on("mousemove", function(d) {
+			divTooltip.style("left", (d3.event.pageX) + "px")		
+                .style("top", (d3.event.pageY) + "px");	
+		  })
+		  .on("click", function(d) {
+			votesCountryTime(d.x);
+		  });
+
+		if (nested_data.length > 50) {
+			d3.selectAll(".x .tick:nth-of-type(3n)").style("opacity","0");
+			d3.selectAll(".x .tick:nth-of-type(3n+2)").style("opacity","0");
+		
+		} else {
+			d3.selectAll(".x .tick").style("opacity","1");
+		}
+			
+			
+	/****** end stack bar *****/	
+
+
+
+
+/****** start timeline *****/			
+
+		//var Tab_nested=nested_data;
+		  var timeDataset = d3.layout.stack()(votesTime.map(function(c) {
+			var bibi= timeDatasetInit.map(function(d) {
+			  return {x: d.name, y: +d[c], date:d.date, "NV": +d['NV'], total: +d.total, Y: +d.Y, N: +d.N, A: +d.A};
+			});
+			return bibi;
+		  }));
+
+		widthTime = Math.max(1000, timeDatasetInit.length*6);  
+		d3.select("#resoDate svg")
+			.attr("width", widthTime+margin.left+margin.right);
+		xTime.rangeRoundBands([0, widthTime]);
+		  
+		  
+		// update scale	  
+		xTime.domain(timeDataset[0].map(function(d) { 
+			return d.x;
+		}))
+		yTime.domain([0, d3.max(timeDataset, function(d) {  return d3.max(d, function(d) { return d.y0 + d.y; });  })]);
+			
+		//update axis
+		xAxisTime.scale(xTime);
+		yAxisTime.scale(yTime).tickSize(-widthTime, 0, 0)	;
+
+		d3.select(".time.x")
+		.call(xAxisTime)
+		.selectAll("text")
+			.attr("y", 0)
+			.attr("x", 9)
+			.attr("dy", ".35em")
+			.attr("transform", "rotate(90)")
+			.style("text-anchor", "start");
+		
+		d3.select(".time.y")
+		.call(yAxisTime);
+	
+		// Create groups for each series, rects for each segment 
+		var groups = svgTime.selectAll("g.timeRect") 
+		  .data(timeDataset);
+		groups.enter().append("g")
+		  .attr("class", "timeRect");
+		groups.exit().remove();
+		groups 
+		  .style("fill", function(d, i) { return colors[i]; });
+
+		var rect = groups.selectAll("rect")
+		  .data(function(d) { return d; });
+		rect.enter()
+		  .append("rect");
+		rect.exit().remove();  
+		rect
+		  .attr("x", function(d) { return xTime(d.x); })
+		  .attr("y", function(d) { return yTime(d.y0 + d.y); })
+		  .attr("height", function(d) { return yTime(d.y0) - yTime(d.y0 + d.y); })
+		  .attr("width", xTime.rangeBand()-1)
+		  .on("mouseover", function(d) {  
+			divTooltip.transition()		
+                .duration(200)		
+                .style("opacity", .9);		
+            divTooltip.html(d.x +" : "+d.y+" votes on "+ d.total+" total votes. Date : "+d.date)	
+                .style("left", (d3.event.pageX) + "px")		
+                .style("top", (d3.event.pageY) + "px");	
+		  })
+		  .on("mouseout", function() {
+			divTooltip.transition()		
+                .duration(500)		
+                .style("opacity", 0);
+		  })
+		  .on("mousemove", function(d) {
+			divTooltip.style("left", (d3.event.pageX) + "px")		
+                .style("top", (d3.event.pageY) + "px");	
+		  });
+
+		if (timeDatasetInit.length > 50) {
+			d3.selectAll(".x.time .tick:nth-of-type(3n)").style("opacity","0");
+			d3.selectAll(".x.time .tick:nth-of-type(3n+2)").style("opacity","0");
+		
+		} else {
+			d3.selectAll(".x.tim .tick").style("opacity","1");
+		}
+
+
+		//show world events
+		var j=0; var timeDatasetInitLength = timeDatasetInit.length;  var end=0;
+		filteredWorldEvents.forEach(function(d,i){
+			end = 0;
+			while ( end==0 && j<=timeDatasetInitLength ) {
+				if (timeDatasetInit[j] != undefined && timeDatasetInit[j].date >= d.date) {
+					d['unres']=timeDatasetInit[j].name;
+					end=1;
+					var text = svgTime.append("text")
+						.attr("class","event events "+i)
+						.attr("x", function() { return xTime(timeDatasetInit[j].name); })
+						.attr("y", 100+50*(i%2))
+						.attr("dy", ".35em")
+						.style("text-anchor", "start")
+						.text(function() { return d.event })
+						.style("pointer-events","none");
+					var bbox = text.node().getBBox();
+					var temp= ".event."+i;
+					svgTime.insert("rect", ".event").attr("x", bbox.x)
+						.attr("y", bbox.y)
+						.attr("width", bbox.width)
+						.attr("height", bbox.height)
+						.attr("class","events "+i)
+						.style("fill", "#fff")
+						//.style("fill-opacity", ".3")
+						.style("stroke", "#666")
+						.style("stroke-width", "1.5px")
+						.style("pointer-events","none");					 
+					svgTime.append("line")
+					.attr("x1", function() { return xTime(timeDatasetInit[j].name); })
+					.attr("x2", function() { return xTime(timeDatasetInit[j].name); })
+					.attr("y1", 100+50*(i%2)+10) 
+					.attr("y2", height)
+					.attr("class","events "+i)
+					.style("stroke", "black")
+					.style("stroke-width", 5)
+					.style("pointer-events","none"); 	
+				} else j++;
+			}			
+		});	
+		
+			
+	/****** end stack bar timeline *****/	
+
+
+	
+		
+	/******* start map *****/
+		//Set input domain for color scale
+		colorMap.domain([
+			d3.min(nested_data, function(d) { return d.total; }),
+			d3.max(nested_data, function(d) { return d.total; })
+		]);
+
+		map.on("viewreset", reset);
+		map.on("moveend", reset);
+		reset();
+	  
+	  // Reposition the SVG to cover the features.
+		function reset() {
+			var bounds = path.bounds(collection),
+				topLeft = bounds[0],
+				bottomRight = bounds[1];
+
+			svgMap.attr("width", bottomRight[0] - topLeft[0])
+				.attr("height", bottomRight[1] - topLeft[1])
+				.style("left", topLeft[0] + "px")
+				.style("top", topLeft[1] + "px");
+
+			g.attr("transform", "translate(" + -topLeft[0] + "," + -topLeft[1] + ")");
+
+			feature.attr("d", path)
+				.on("mouseover", function(d) { 
+					divTooltip.transition()		
+						.duration(200)		
+						.style("opacity", .9);		
+	
+					//*** EVO 1 maybe add a dedicated table when data are nested country[countryName]={data} to avoid filtering the nested data
+					var patt2 = new RegExp((d.properties.name).toLowerCase());
+					countryData = nested_data.filter(function(data) {
+							var res = patt2.test(data['country']); 
+							return res;  
+						});
+					if (countryData.length != 0) {	
+						divTooltip.html(d.properties.name+" "+countryData[0].total+" votes")	
+							.style("left", (d3.event.pageX) + "px")		
+							.style("top", (d3.event.pageY) + "px");	
+					} else {
+						divTooltip.html(d.properties.name+" don't participate in votes")	
+							.style("left", (d3.event.pageX) + "px")		
+							.style("top", (d3.event.pageY) + "px");							
+					}
+					//*** end EVO1 **			
+
+				})
+				.on("mouseout", function() {
+					divTooltip.transition()		
+						.duration(500)		
+						.style("opacity", 0);
+				})
+				.on("mousemove", function(d) {
+					divTooltip.style("left", (d3.event.pageX) + "px")		
+						.style("top", (d3.event.pageY) + "px");	
+				
+
+				
+				})
+				.attr("class",function(d) {
+					c = path.centroid(d);
+					//*** EVO 1 maybe add a dedicated table when data are nested country[countryName]={data} to avoid filtering the nested data*
+					var patt2 = new RegExp((d.properties.name).toLowerCase());
+					countryData = nested_data.filter(function(data) {
+							var res = patt2.test(data['country']); 
+							return res;  
+						});
+					if (countryData.length != 0) {	
+						pieData=[countryData[0]['Y'],countryData[0]['N'],countryData[0]['A'],countryData[0]['9']];
+						pieVotes(c, pieData, g, d.properties.name);
+					} 
+					//*** end EVO1 **
+				
+					return ("country "+d.properties.name).toLowerCase();	
+				});
+			
+			
+			if (mapLegend != undefined) {
+				mapLegend.removeFrom(map);
+				mapLegend= L.control({position: 'bottomright'});
+				mapLegend.onAdd = function (map) {
+					var div = L.DomUtil.create('div', 'info legend');
+					div.innerHTML += '<p>votes #</p>';
+					return div;
+				};
+				mapLegend.addTo(map);
+			
+				d3.selectAll(".info").append("svg").attr("width",125).append("g")
+				.attr("class", "legendQuant");
+			
+				var legend = d3.legend.color()
+				  .labelFormat(d3.format(".0f"))
+				  .scale(colorMap);
+
+				d3.select(".legendQuant")
+				  .call(legend);
+
+			};
+			nested_data.forEach(function(d) {
+				var value = d.total;
+				if (value) {
+					d3.select("."+d.country).style("fill", colorMap(value));
+				} else {
+					d3.select("."+d.country).style("fill", "#ccc");
+				}
+			});
+		}
+
+
+/******* end map ********/
+
+	  
+	}	// end filtering	
+
+	});	//d3.json loading countries		
+}); //d3.dsv loading data
+	
+	/** end reading file **/
+
+// Use Leaflet to implement a D3 geometric transformation.
+function projectPoint(x, y) {
+	var point = map.latLngToLayerPoint(new L.LatLng(y, x));
+	this.stream.point(point.x, point.y);
+}
+
+//replacong vote letters by a numerical value for correlation calculation
+function replacevote(vote) {
+	switch (vote) {
+		case "Y" : return 1; break;
+		case "N" : return -1; break;
+		case "A" : return 0; break;
+		case "9" : return 0; break;
+		default : return 0;	
+	}
+}
+		
+// creates pie chart on the map
+function pieVotes(geo, pieData, g, name) {
+	if (name=="United_States") {
+		tempgeo =map.latLngToLayerPoint(usCenter)
+		geo[0]=tempgeo.x;
+		geo[1]=tempgeo.y;
+	}	
+	var arcs = g.selectAll(".arc.unVotes."+name)
+		.data(pie(pieData));
+	arcs.enter() 
+	.append("path")
+	.attr("class", "arc unVotes "+name);
+	arcs.exit().remove();
+	arcs.style("pointer-events","none")
+	.attr("transform", "translate(" + geo[0] + "," + geo[1] + ")") // center the pie chart on the center of the country			
+	.attr("fill", function(d, i) { return colors[i]; }) 
+	.attr("d", arc);   
+
+}
+	
+function votesCountryTime(country) {
+	$("#countryTime").html("<H2>Votes for "+country+" on time</H2>");
+	var tempArray = filteredDataset.filter(function(d) {
+		return d[country] != "";
+	});
+	
+	resArray = tempArray.map(function(c) { 
+		return {name: c.un_resolution_symbol, date: c.vote_date, vote: c[country]};
+	});
+	resArray = resArray.sort(function(a,b) {return a.date-b.date;});
+	svgCountryTime = d3.select("#countryTime").append("svg").attr("width",200).attr("height",200);
+
+	widthCTime = Math.max(1000, resArray.length*6);  
+
+	d3.select("#countryTime svg")
+		.attr("width", widthCTime+margin.left+margin.right);
+	
+	var xCTime = d3.scale.ordinal()
+	.rangeRoundBands([0, widthCTime])
+	.domain(resArray.map(function(d) { 
+		return d.name;
+	}));
+		
+	// Define and draw axes
+	var xAxisCTime = d3.svg.axis()
+	  .scale(xCTime)
+	  .orient("bottom");
+
+	svgCountryTime.append("g")
+	  .attr("class", "ctime x axis")
+	  .attr("transform", "translate(0," + 90 + ")")
+	  .call(xAxisTime);
+	
+	d3.select(".ctime.x")
+	.call(xAxisCTime)
+	.selectAll("text")
+		.attr("y", 0)
+		.attr("x", 9)
+		.attr("dy", ".35em")
+		.attr("transform", "rotate(90)")
+		.style("text-anchor", "start");
+		
+	svgCountryTime.selectAll(".countryVotes")
+	.data(resArray)
+	.enter()
+	.append("rect")
+	.attr("width",xCTime.rangeBand()-1)
+	.attr("height",30)
+	.attr("x",function(d){return xCTime(d.name); }) 
+	.attr("y",60)
+	.attr("fill",function(d) {
+		return colors[votes.indexOf(d.vote)]; 
+	})
+	.on("mouseover", function(d) {  
+		divTooltip.transition()		
+			.duration(200)		
+			.style("opacity", .9);		
+		divTooltip.html(country+" votes "+d.vote+" on resolution "+d.name)	
+			.style("left", (d3.event.pageX) + "px")		
+			.style("top", (d3.event.pageY) + "px");	
+	})
+	.on("mouseout", function() {
+		divTooltip.transition()		
+			.duration(500)		
+			.style("opacity", 0);
+	})
+	.on("mousemove", function(d) {
+		divTooltip.style("left", (d3.event.pageX) + "px")		
+			.style("top", (d3.event.pageY) + "px");	
+	});
+	
+	if (resArray.length > 50) {
+		d3.selectAll(".ctime .tick:nth-of-type(3n)").style("opacity","0");
+		d3.selectAll(".ctime .tick:nth-of-type(3n+2)").style("opacity","0");
+	
+	} else {
+		d3.selectAll(".ctime .tick").style("opacity","1");
+	}
+	
+}		
+		
+			
+		</script>
+		<script src="cloud2.min.js"></script>
+	</body>
+</html>

@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="en">
+	<!-- 
+	Evolutions
+		légende pour la carte (nb de votes par pays) => selectionner le nb de couler et invertextent https://github.com/d3/d3-3.x-api-reference/blob/master/Quantitative-Scales.md
+		
+		timeline avec les resol et les votes + grande date
+		quand on clique sur un pays voir la liste de ses votes dans le temps
+		Au survol d'un pays ajout des resolutions votées 
+		
+		prise en compte de l'évolution des pays (existant ou non existant suivant date :
+		tester les regexp avec quote double quote, etc.
+		affichage de qui est au conseil de sécurité ou démarqué les résolutions conseil de sécurité : www.un.org/en/sc/members/elected.asp
+		charger les fichiers en defer avec queue.js ?		
+		recherche 
+			par type de votes (enregistré, adopté sans vote, etc.)
+	-->
+	<head>
+		<meta charset="utf-8">
+		<title>GAViz</title>
+		<script type="text/javascript" src="d3.min.js"></script>
+		<script type="text/javascript" src="jquery.min.js"></script>
+		<script type="text/javascript" src="js/colorbrewer.js"></script>
+		<script type="text/javascript" src="js/d3-legend.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.5/leaflet.js"></script>	
+    <link rel="stylesheet" type="text/css" href="http://cdnjs.cloudflare.com/ajax/libs/leaflet/0.7.5/leaflet.css"/>
+
+	
+		<style type="text/css">
+			.grid .tick {
+				stroke: lightgrey;
+				stroke-opacity: 0.7;
+				shape-rendering: crispEdges;
+			}
+			
+			.grid path {
+				stroke-width: 0;
+			}
+
+			.axis path,
+			.axis line {
+				fill: none;
+				stroke: black;
+				shape-rendering: crispEdges;
+			}
+			
+			.axis text {
+				font-family: sans-serif;
+				font-size: 11px;
+			}
+			
+			div.tooltip {
+			  position: absolute;	
+			  text-align: center;	
+			  width: 150px;		
+			  padding: 2px;	
+			  font: 12px sans-serif;	
+			  background: lightsteelblue;	
+			  border: 0px;					
+			  border-radius: 8px;
+			  pointer-events:none;
+			}
+			
+			#title, #expText  {
+    width: 70%;
+    margin: 0 auto;
+}
+#title {
+text-align:center;
+}
+
+#expText {
+    border-radius: 25px;
+    border: 2px solid #8AC007;
+	padding : 5px 5px 5px 5px;
+	background : #d3d3d3;
+}
+
+#map {
+  width: 960px;
+  height: 500px;
+}
+
+svg {
+  position: relative;
+}
+
+path.country {
+  fill: #000;
+  fill-opacity: 1;
+  stroke: #fff;
+  stroke-width: 1.5px;
+}
+
+path.country:hover {
+  fill: brown;
+  fill-opacity: 1;
+}
+
+</style>		
+		
+	</head>
+	<body>
+	<div>
+		<div id="title"><H1>Navigate in the UNO General Assembly Resolutions <img src="WHS-logo.PNG" height="40"></H1></div>
+		<Div id="expText"><p>Interactive datavizualisation made by <a href="https://twitter.com/FournaiseThomas">@FournaiseThomas</a></p>
+		<p>Search for keyword in the search bar. You will then see some dataviz about the votes. Click or pass over graphs to have more informations</p>
+		<p>At the bottom of the graphs you can have the list of documents corresponding to your filtering criteria</p>
+		</div>
+		
+		<div>Keyword <input type="text" id="keyword" placeholder="search for keywords like atomic, algeria, etc."> start date <input type="text" id="startdate" placeholder="20161225"> end date <input type="text" id="enddate" placeholder="20161225"></BR>
+			 Resolutions <input type="radio" name="resoType" value="sc" > Security council
+				  <input type="radio" name="resoType" value="ga"> General Assembly
+				  <input type="radio" name="resoType" value="both" checked> Both</BR>
+		<button type="button" id="searchButton">Search</button></div>
+		<div id="countryNumber"></div>
+		<div>
+			<p id="map">
+		</div>
+	</div>	
+		<script type="text/javascript">
+
+var separator=";";
+var dsv = d3.dsv(separator, "text/plain");
+
+var fileData;
+var votes = ["Y", "N", "A", "9"];	
+var searchText = $('#keyword').val();
+var startDate = $('#startdate').val();
+var endDate = $('#enddate').val();
+var resoType = $('input[name=resoType]:checked').val();
+
+var colorMap = d3.scale.quantile()
+	.range(colorbrewer.BuGn[6]); 
+//var colorMap = d3.scale.quantize()
+//.range(["#ffffcc", "#c2e699", "#78c679", "#31a354", "#006837"]);
+//Colors taken from colorbrewer.js, included in the D3 download
+/*			var colorScale = d3.scale.quantile()
+			.domain([10,200]) // input data
+			.range(colorbrewer.PuBu[9]);
+			*/
+
+	
+	//piechart and stackbar colors	
+	var colors = ["#2c7bb6", "#d7191c", "#fdae61", "#abd9e9"];
+var pattAdoptwitout = new RegExp("ADOPTED WITHOUT", 'i');
+var pattNonRecord = new RegExp("NON-RECORDED", 'i');
+var pattRec = new RegExp("RECORDED", 'i');
+
+
+/**start stack generalities ***/
+	var margin = {top: 20, right: 50, bottom: 75, left: 30};
+
+	var width = 1080,
+		height = 600 - margin.top - margin.bottom;
+
+	var svgStack = d3.select("body")
+	  .append("svg")
+	  .attr("width", width)
+	  .attr("height", height + margin.top + margin.bottom)
+	  .append("g")
+	  .attr("transform", "translate(" + margin.left + "," + margin.top + ")");
+
+	var parse = d3.time.format("%Y").parse;
+
+	// Set x, y and colors
+	var x = d3.scale.ordinal()
+	  .rangeRoundBands([10, width- margin.left - margin.right]);
+
+	var y = d3.scale.linear()
+	 .range([height, 0]);
+
+	// Define and draw axes
+	var yAxis = d3.svg.axis()
+	  .scale(y)
+	  .orient("left")
+	  .ticks(5)
+	  .tickSize(-width, 0, 0)
+	  .tickFormat( function(d) { return d } );
+
+	var xAxis = d3.svg.axis()
+	  .scale(x)
+	  .orient("bottom");
+
+	svgStack.append("g")
+	  .attr("class", "stack y axis")
+	  .call(yAxis);
+
+	svgStack.append("g")
+	  .attr("class", "stack x axis")
+	  .attr("transform", "translate(0," + height + ")")
+	  .call(xAxis);
+
+	// Draw legend
+	var legend = svgStack.selectAll(".legend")
+	  .data(colors)
+	  .enter().append("g")
+	  .attr("class", "legend")
+	  .attr("transform", function(d, i) { return "translate(30," + i * 19 + ")"; });
+	 
+	legend.append("rect")
+	  .attr("x", width - margin.left - margin.right - 18)
+	  .attr("width", 18)
+	  .attr("height", 18)
+	  .style("fill", function(d, i) {return colors[i];});
+	 
+	legend.append("text")
+	  .attr("x", width - margin.left - margin.right + 5)
+	  .attr("y", 9)
+	  .attr("dy", ".35em")
+	  .style("text-anchor", "start")
+	  .text(function(d, i) { return votes[i]; });
+	 
+/**end stack generalities ***/
+
+/**start piechart generalities ***/
+var outerRadius=10;
+var innerRadius=0;
+var arc=d3.svg.arc().innerRadius(innerRadius).outerRadius(outerRadius);
+var pie=d3.layout.pie();	
+
+/**end piechart generalities ***/
+
+/**start map generalities ***/
+var map = new L.Map("map", {center: [15, 0], zoom: 2})
+	.addLayer(new L.TileLayer("http://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"));
+
+var svg = d3.select(map.getPanes().overlayPane).append("svg"),
+    g = svg.append("g").attr("class", "leaflet-zoom-hide");
+
+var transform = d3.geo.transform({point: projectPoint}),
+	path = d3.geo.path().projection(transform);
+	
+/**end map generalities ***/	
+
+/** start doc list generalities**/
+var docList = d3.select("body")
+	.append("div")
+	.attr("id", "docList");
+			
+/** end doc list generalities **/
+
+// Define the div for the tooltip
+var divTooltip = d3.select("body").append("div")	
+    .attr("class", "tooltip")				
+    .style("opacity", 0);
+	
+/** start reading file **/
+var data = dsv('votes4.csv', function(csvData) {
+
+d3.json("geo/countries.geo.json", function(error, collection) {
+	if (error) throw error;
+
+	 
+	var feature = g.selectAll("path")
+		.data(collection.features)
+		.enter().append("path");
+	
+	searchText = $('#keyword').val();
+	startDate = $('#startdate').val();
+	endDate = $('#enddate').val();
+	fileData=csvData;
+
+	$("#searchButton").click(function(){filtering();});
+	filtering();
+	
+	function filtering() {
+	
+		//empty pie chart
+		svg.selectAll(".arc.unVotes").remove();
+		svg.selectAll(".country").style("fill","#000");
+		svg.selectAll(".legendQuant").remove();
+	
+		searchText = $('#keyword').val();
+		startDate = $('#startdate').val();
+		endDate = $('#enddate').val();
+		if (endDate =="") {endDate=99991231;}
+		resoType = $('input[name=resoType]:checked').val();
+		var pattReso = new RegExp("", 'i');
+		switch(resoType) {
+			case "ga":
+				var pattReso = new RegExp("A/RES", 'i');
+				break;
+			case "sc":
+				var pattReso = new RegExp("S/RES", 'i');
+				break;
+		} 
+		
+		var patt = new RegExp(searchText, 'i');
+			
+		var filteredDataset=csvData;
+		var filterText = "<span>The following filters are active : </span>"
+
+		filteredDataset = filteredDataset.filter(function(data) {
+			var res = patt.test(data['title']) && (endDate>=data['vote_date']) && (startDate<=data['vote_date']) && pattReso.test(data['un_resolution_symbol'])  ; 
+			return res;  
+		});
+
+		textDocList= filteredDataset.length+ " resolutions on " +csvData.length+ " correspond to your search criteria :</BR>"
+		filteredDataset.forEach(function(d) {
+			textDocList += "* "+ d.title+"</BR>";
+		});
+		docList.html(textDocList);		
+	
+		var nested_data = d3.nest()
+	//.rollup(function(leaves) { return {"A1": d3.sum(leaves, function(d) {return parseInt(d.A1);}),"B1": d3.sum(leaves, function(d) {return parseInt(d.B1);}) ,"C1": d3.sum(leaves, function(d) {return parseInt(d.C1);}) ,"D1": d3.sum(leaves, function(d) {return parseInt(d.D1);}) } })
+		.rollup(function(leaves) {
+			var json = new Object();
+			var json2 = new Object();
+			var tempObj=filteredDataset[0];
+			var text = '[';		
+			for(var i in tempObj) {
+				if (i=="vote_notes") {
+					valAdoptW =d3.sum(leaves, function(d) {
+						if (d[i].startsWith("ADOPTED WITHOUT") ) return 1; else return 0;
+					})
+					valNonRecord =d3.sum(leaves, function(d) {
+						if (d[i].startsWith("NON-RECORDED") ) return 1; else return 0;
+					})
+					valRec =d3.sum(leaves, function(d) {
+						if (d[i].startsWith("RECORDED") ) return 1; else return 0;
+					})
+					valEmptyNotes =d3.sum(leaves, function(d) {
+						if (d[i]=="" ) return 1; else return 0;
+					})
+					text += '{"votes":"'+i+'","AdoptW":'+valAdoptW+',"NR":'+valNonRecord+',"R":'+valRec+',"Empt":'+valEmptyNotes+',"total":'+ (valAdoptW+valNonRecord+valRec+valEmptyNotes) +'},';
+				
+				} else if (i!="un_resolution_symbol" && i!="title" && i!="vote_date" && i!="voting_summary") { //un_resolution_symbol;title;vote_notes;vote_date;voting_summary
+					/*json[i+"Y"]=d3.sum(leaves, function(d) {
+						if (d[i]=="Y") return 1; else return 0;
+					})
+					json[i+"N"]=d3.sum(leaves, function(d) {
+						if (d[i]=="N") return 1; else return 0;
+					})
+					json[i+"A"]=d3.sum(leaves, function(d) {
+						if (d[i]=="A") return 1; else return 0;
+					})
+					json[i+"9"]=d3.sum(leaves, function(d) {
+						if (d[i]=="9") return 1; else return 0;
+					})*/
+					valY=d3.sum(leaves, function(d) {
+						if (d[i]=="Y") return 1; else return 0;
+					})
+					valN=d3.sum(leaves, function(d) {
+						if (d[i]=="N") return 1; else return 0;
+					})
+					valA=d3.sum(leaves, function(d) {
+						if (d[i]=="A") return 1; else return 0;
+					})
+					val9=d3.sum(leaves, function(d) {
+						if (d[i]=="9") return 1; else return 0;
+					})
+					//text = '[{"vote":"Y","value":'+valY+'},{"vote":"N","value":'+valN+'},{"vote":"A","value":'+valA+'},{"vote":"9","value":'+val9+'}]';
+					//JText = JSON.parse(text);
+					//json2[i]=JText;  //nested_data['brazil'][0]['Y']
+					if ((valY+valN+valA+val9)!=0) {
+						text += '{"country":"'+i+'","Y":'+valY+',"N":'+valN+',"A":'+valA+',"9":'+val9+',"total":'+ (valY+valN+valA+val9) +'},';
+					}
+					//JText = JSON.parse(text);
+					//json2[i]=JText; 					
+					
+				}
+				
+			}
+			text += '{"country":"end","Y":0,"N":0,"A":0,"0":0,"9":0}]';			//adding empty json to avoid that array finish by a coma
+			JText = JSON.parse(text);
+			JText.pop(); // deleting empty value
+			json2=JText;
+			return json2;
+		})
+		.entries(filteredDataset);
+		
+		
+		var voteNotes = nested_data[0];
+		nested_data.shift(); // deleting first value wich correpond to voting information
+		$('#countryNumber').html(nested_data.length+" countries participating in votes; "+voteNotes['AdoptW']+" resolutions adopted without vote and "+voteNotes['NR']+" non recorded votes on a total of "+filteredDataset.length+" resolutions");
+		
+		
+		
+/****** debut stack bar *****/			
+
+		var Tab_nested=nested_data;
+		  var stackDataset = d3.layout.stack()(votes.map(function(c) {
+			var bibi= Tab_nested.map(function(d) {
+			  return {x: d.country, y: d[c], "9":d['9'], total:d.total, Y:d.Y, N:d.N, A:d.A};
+			});
+			return bibi;
+		  }));
+
+		// update scale	  
+		x.domain(stackDataset[0].map(function(d) { return d.x; }))
+		y.domain([0, d3.max(stackDataset, function(d) {  return d3.max(d, function(d) { return d.y0 + d.y; });  })]);
+			
+		//update axis
+		xAxis.scale(x);
+		yAxis.scale(y);
+
+		d3.select(".x")
+		.call(xAxis)
+		.selectAll("text")
+			.attr("y", 0)
+			.attr("x", 9)
+			.attr("dy", ".35em")
+			.attr("transform", "rotate(90)")
+			.style("text-anchor", "start");
+		
+		d3.select(".y")
+		.call(yAxis);
+
+		// Create groups for each series, rects for each segment 
+		var groups = svgStack.selectAll("g.cost") 
+		  .data(stackDataset);
+		groups.enter().append("g")
+		  .attr("class", "cost");
+		groups.exit().remove();
+		groups 
+		  .style("fill", function(d, i) { return colors[i]; });
+
+		var rect = groups.selectAll("rect")
+		  .data(function(d) { return d; });
+		rect.enter()
+		  .append("rect");
+		rect.exit().remove();  
+		rect
+		  .attr("x", function(d) { return x(d.x); })
+		  .attr("y", function(d) { return y(d.y0 + d.y); })
+		  .attr("height", function(d) { return y(d.y0) - y(d.y0 + d.y); })
+		  .attr("width", x.rangeBand()-1)
+		  .on("mouseover", function(d) {  
+			divTooltip.transition()		
+                .duration(200)		
+                .style("opacity", .9);		
+            divTooltip.html(d.x +" : "+d.y+" votes on "+ d.total+" total votes")	
+                .style("left", (d3.event.pageX) + "px")		
+                .style("top", (d3.event.pageY) + "px");	
+		  })
+		  .on("mouseout", function() {
+			divTooltip.transition()		
+                .duration(500)		
+                .style("opacity", 0);
+		  })
+		  .on("mousemove", function(d) {
+			divTooltip.style("left", (d3.event.pageX) + "px")		
+                .style("top", (d3.event.pageY) + "px");	
+		  });
+
+		if (nested_data.length > 50) {
+			d3.selectAll(".x .tick:nth-of-type(3n)").style("opacity","0");
+			d3.selectAll(".x .tick:nth-of-type(3n+2)").style("opacity","0");
+		
+		} else {
+			d3.selectAll(".x .tick").style("opacity","1");
+		}
+			
+			
+	/****** fin stack bar *****/		
+		
+	/******* debut map ********/
+		//Set input domain for color scale
+		colorMap.domain([
+			d3.min(nested_data, function(d) { return d.total; }),
+			d3.max(nested_data, function(d) { return d.total; })
+		]);
+
+
+
+		map.on("viewreset", reset);
+		map.on("moveend", reset);
+		reset();
+	  
+	  // Reposition the SVG to cover the features.
+		function reset() {
+			var bounds = path.bounds(collection),
+				topLeft = bounds[0],
+				bottomRight = bounds[1];
+
+			svg.attr("width", bottomRight[0] - topLeft[0])
+				.attr("height", bottomRight[1] - topLeft[1])
+				.style("left", topLeft[0] + "px")
+				.style("top", topLeft[1] + "px");
+
+			g.attr("transform", "translate(" + -topLeft[0] + "," + -topLeft[1] + ")");
+
+			feature.attr("d", path)
+				.on("mouseover", function(d) { 
+					divTooltip.transition()		
+						.duration(200)		
+						.style("opacity", .9);		
+	
+					/*** EVO 1 maybe add a dedicated table when data are nested country[countryName]={data} to avoid filtering the nested data***/
+					var patt2 = new RegExp((d.properties.name).toLowerCase());
+					countryData = nested_data.filter(function(data) {
+							var res = patt2.test(data['country']); 
+							return res;  
+						});
+					if (countryData.length != 0) {	
+						divTooltip.html(d.properties.name+" "+countryData[0].total+" votes")	
+							.style("left", (d3.event.pageX) + "px")		
+							.style("top", (d3.event.pageY) + "px");	
+					} else {
+						divTooltip.html(d.properties.name+" don't participate in votes")	
+							.style("left", (d3.event.pageX) + "px")		
+							.style("top", (d3.event.pageY) + "px");							
+					}
+					/*** end EVO1 ****/				
+
+				})
+				.on("mouseout", function() {
+					divTooltip.transition()		
+						.duration(500)		
+						.style("opacity", 0);
+				})
+				.on("mousemove", function(d) {
+					divTooltip.style("left", (d3.event.pageX) + "px")		
+						.style("top", (d3.event.pageY) + "px");	
+				
+
+				
+				})
+				.attr("class",function(d) {
+					c = path.centroid(d);
+					/*** EVO 1 maybe add a dedicated table when data are nested country[countryName]={data} to avoid filtering the nested data***/
+					var patt2 = new RegExp((d.properties.name).toLowerCase());
+					countryData = nested_data.filter(function(data) {
+							var res = patt2.test(data['country']); 
+							return res;  
+						});
+					if (countryData.length != 0) {	
+						pieData=[countryData[0]['Y'],countryData[0]['N'],countryData[0]['A'],countryData[0]['9']];
+						pieVotes(c, pieData, g, d.properties.name);
+					} 
+					/*** end EVO1 ****/
+				
+					return ("country "+d.properties.name).toLowerCase();	
+				});
+			
+			/* choropleth
+			foreach country in nested_data
+			check value
+			d3.select(.countryName).attr(fill, value)
+			*/
+			
+			var mapBounds=map.getBounds();
+			bottomLeft = map.latLngToLayerPoint(mapBounds._southWest);
+			
+			g.append("g")
+				.attr("class", "legendQuant")
+				.attr("transform", "translate(10,100)");
+
+
+			var legend = d3.legend.color()
+			  .labelFormat(d3.format(".0f"))
+			  .scale(colorMap);
+
+			d3.select(".legendQuant")
+			  .call(legend);
+			
+			nested_data.forEach(function(d) {
+				var value = d.total;
+				if (value) {
+					d3.select("."+d.country).style("fill", colorMap(value));
+				} else {
+					d3.select("."+d.country).style("fill", "#ccc");
+				}
+			});
+		}
+
+
+/******* fin map ********/
+	  
+	}	// end filtering	
+
+	});	//d3.json loading countries		
+}); //d3.dsv loading data
+	
+	/** end reading file **/
+console.log("test");
+
+// Use Leaflet to implement a D3 geometric transformation.
+function projectPoint(x, y) {
+	var point = map.latLngToLayerPoint(new L.LatLng(y, x));
+	this.stream.point(point.x, point.y);
+}
+		
+
+function pieVotes(geo, pieData, g, name) {
+
+	var arcs = g.selectAll(".arc.unVotes."+name)
+		.data(pie(pieData));
+	arcs.enter() 
+	.append("path")
+	.attr("class", "arc unVotes "+name);
+	arcs.exit().remove();
+	arcs.style("pointer-events","none")
+	.attr("transform", "translate(" + geo[0] + "," + geo[1] + ")") // on décale pour centrer le pie chart au milieu de la feuille			
+	.attr("fill", function(d, i) { return colors[i]; }) 
+	.attr("d", arc);   
+
+}
+			
+		
+		
+			
+		</script>
+	</body>
+</html>
